@@ -1,11 +1,11 @@
-import sys
 import requests
+import sys
 
 from get_puuid import get_puuid
-import match_cache
 from config import API_KEY_FILE
+import match_cache
 
-def get_solo_duo_match_history(puuid, api_key, count=20):
+def get_solo_duo_match_history(puuid, api_key, count):
     # Construct the match history API URL
     match_api_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids?queue=420&start=0&count={count}&api_key={api_key}"
 
@@ -23,30 +23,36 @@ def get_solo_duo_match_history(puuid, api_key, count=20):
         sys.exit(1)
 
 def get_match_details(match_id, api_key):
-    # Construct the match details API URL
-    match_details_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}?api_key={api_key}"
+    # Construct the match details API URLs
+    match_data_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}?api_key={api_key}"
+    timeline_data_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}/timeline?api_key={api_key}"
 
-    # Make the match details API request
+    # Make the match details API requests
     print(f"Fetching match details for Match ID: {match_id}...")
-    match_details_response = requests.get(match_details_url)
+    match_data_response = requests.get(match_data_url)
+    timeline_data_response = requests.get(timeline_data_url)
 
     # Check the match details response status code
-    if match_details_response.status_code == 200:
+    if match_data_response.status_code == 200 and timeline_data_response.status_code == 200:
         print("Successfully fetched match details.")
-        match_details_data = match_details_response.json()
-        return match_details_data
+        match_data = match_data_response.json()
+        timeline_data = timeline_data_response.json()
+        return match_data, timeline_data
+    elif match_data_response.status_code != 200:
+        print(f"Error: {match_data_response.status_code} - {match_data_response.text}")
+        sys.exit(1)
     else:
-        print(f"Error: {match_details_response.status_code} - {match_details_response.text}")
+        print(f"Error: {timeline_data_response.status_code} - {timeline_data_response.text}")
         sys.exit(1)
 
-def update_cache(cache, puuid, api_key):
+def update_cache(cache, puuid, api_key, count=20):
     # Get the match history for the given PUUID
-    new_matches = get_solo_duo_match_history(puuid, api_key)
+    new_matches = get_solo_duo_match_history(puuid, api_key, count)
 
     for match_id in new_matches:
         if not cache.has_match(match_id):
-            match_data = get_match_details(match_id, api_key)
-            cache.save_match(match_id, match_data)
+            match_data, timeline_data = get_match_details(match_id, api_key)
+            cache.save_match(match_id, match_data, timeline_data)
         else:
             print(f"Match ID {match_id} already exists in cache. Skipping...")
 

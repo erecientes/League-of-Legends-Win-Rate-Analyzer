@@ -1,6 +1,6 @@
-import sys
-import json
 import requests
+import json
+import sys
 
 from config import USERS_FILE
 
