@@ -1,0 +1,12 @@
+# Local data — API key, cached usernames
+data/
+
+# Local match caches (SQLite databases)
+db/
+
+# Test outputs/scratch
+tests/
+
+# Python noise
+__pycache__/
+*.pyc
