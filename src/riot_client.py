@@ -1,7 +1,7 @@
 """
 Usage:
     from riot_client import RiotAPIClient, InvalidAPIKeyError, RiotAPIError
-    from update_key import get_new_key   # your own callback, see update_key.py
+    from update_key import get_new_key   # see update_key.py
  
     client = RiotAPIClient(api_key=load_saved_key(), key_refresh_callback=get_new_key)
  

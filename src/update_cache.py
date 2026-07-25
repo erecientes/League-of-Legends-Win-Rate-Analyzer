@@ -30,8 +30,8 @@ def cache_rank(client, puuid: str) -> None:
 def main():
     client = RiotAPIClient(api_key=load_saved_key(), key_refresh_callback=update_key)
  
-    username = input("Enter the username: ")
-    tag = input("Enter the tag: ")
+    username = input("Enter the username: ").lower().strip()
+    tag = input("Enter the tag: ").lower().strip()
  
     try:
         puuid = get_puuid(username, tag, client)
