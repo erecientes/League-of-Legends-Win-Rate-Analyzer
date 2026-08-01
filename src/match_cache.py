@@ -3,6 +3,7 @@ import sqlite3
 import json
 
 from config import DB_DIR
+
  
 # This class provides a simple caching mechanism for match data fetched from the Riot API. 
 class MatchCache:

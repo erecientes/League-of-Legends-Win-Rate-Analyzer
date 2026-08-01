@@ -1,7 +1,11 @@
 """
+riot_client.py
+
+A simple Riot API client that handles attaching the current API key to every request.
+
 Usage:
     from riot_client import RiotAPIClient, InvalidAPIKeyError, RiotAPIError
-    from update_key import get_new_key   # see update_key.py
+    from get_key import get_new_key   # see get_key.py
  
     client = RiotAPIClient(api_key=load_saved_key(), key_refresh_callback=get_new_key)
  
@@ -15,6 +19,7 @@ Usage:
 
 from typing import cast
 import requests
+
  
 class RiotAPIError(Exception):
     """Raised for any non-2xx Riot API response that ISN'T a recoverable
