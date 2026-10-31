@@ -1,13 +1,14 @@
 """
-Riot API client with automatic authentication and key refresh.
+Riot API client with automatic authentication, token refresh, and rate limit backoff.
 
 Usage:
-    from riot_client import RiotAPIClient
+    from api.riot_client import RiotAPIClient
     client = RiotAPIClient(api_key="...", key_refresh_callback=update_key_fn)
     puuid = client.get_puuid("Username", "Tag")
-    match_ids = client.get_match_ids(puuid, count=20)
+    match_ids = client.get_match_ids(puuid, start=0, count=20)
 """
 
+import time
 from typing import cast
 import requests
 
@@ -25,19 +26,26 @@ class InvalidAPIKeyError(Exception):
 
 
 class RiotAPIClient:
-    """Wrapper around Riot Games API endpoints with automatic 401/403 token refresh."""
+    """Wrapper around Riot Games API endpoints with automatic auth refresh and rate limit handling."""
 
     def __init__(self, api_key: str, key_refresh_callback):
         self.api_key = api_key
         self._get_new_key = key_refresh_callback
 
     def _request(self, url: str, params: dict | None = None) -> dict:
-        """Execute HTTP GET with auth. Refresh and retry once on 401/403."""
+        """Execute HTTP GET with auth. Handles 401/403 key refresh and 429 rate limit backoff."""
         params = dict(params or {})
         params["api_key"] = self.api_key
 
         response = requests.get(url, params=params)
 
+        # Handle rate limiting (429)
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", 5))
+            time.sleep(retry_after)
+            response = requests.get(url, params=params)
+
+        # Handle invalid or expired API key (401, 403)
         if response.status_code in (401, 403):
             self.api_key = self._get_new_key()
             params["api_key"] = self.api_key
@@ -57,10 +65,10 @@ class RiotAPIClient:
         data = self._request(url)
         return data["puuid"]
 
-    def get_match_ids(self, puuid: str, count: int = 20, queue: int = 420) -> list[str]:
+    def get_match_ids(self, puuid: str, start: int = 0, count: int = 20, queue: int = 420) -> list[str]:
         """Fetch list of match IDs for a PUUID, filtered by queue ID."""
         url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids"
-        result = self._request(url, params={"queue": queue, "start": 0, "count": count})
+        result = self._request(url, params={"queue": queue, "start": start, "count": count})
         return cast(list[str], result)
 
     def get_match(self, match_id: str) -> dict:

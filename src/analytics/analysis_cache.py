@@ -9,7 +9,8 @@ Usage:
 from pathlib import Path
 import pandas as pd
 from config import DATA_DIR
-from analytics.item_data import classify_item, load_item_data, patch_from_game_version
+from analytics.item_data import classify_item, patch_from_game_version
+from api.ddragon_client import DDragonClient
 
 SCHEMA_VERSION = 1
 
@@ -126,6 +127,7 @@ def build_or_update_frames(cache, my_puuid: str, cache_dir: str | None = None):
     new_match_ids = [mid for mid in cache.get_all_match_ids() if mid not in already_processed]
 
     if new_match_ids:
+        ddragon = DDragonClient()
         item_data_cache: dict[str, dict] = {}
         new_match_rows, new_item_rows, new_rune_rows = [], [], []
 
@@ -137,7 +139,7 @@ def build_or_update_frames(cache, my_puuid: str, cache_dir: str | None = None):
 
             patch = patch_from_game_version(match_data["info"]["gameVersion"])
             if patch not in item_data_cache:
-                item_data_cache[patch] = load_item_data(patch)
+                item_data_cache[patch] = ddragon.get_item_data(patch)
 
             m_row, i_rows, r_rows = _process_match(
                 match_id, match_data, timeline_data, my_puuid, item_data_cache[patch]
