@@ -1,13 +1,26 @@
+"""
+Configuration constants and storage paths.
+
+Usage:
+    from config import DATA_DIR, DB_DIR, ENV_FILE, USERS_FILE
+"""
+
 from pathlib import Path
+import sys
 
-# LOL_API/src/config.py -> parent is src/, parent.parent is LOL_API/
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Persistent storage directory (supports frozen standalone executables)
+if getattr(sys, "frozen", False):
+    APP_DIR = Path(sys.executable).resolve().parent
+else:
+    APP_DIR = Path(__file__).resolve().parent.parent
 
-DATA_DIR = PROJECT_ROOT / "data"
-DB_DIR = PROJECT_ROOT / "db"
+PROJECT_ROOT = APP_DIR
 
-DATA_DIR.mkdir(exist_ok=True)
-DB_DIR.mkdir(exist_ok=True)
+ENV_FILE = APP_DIR / ".env"
+DATA_DIR = APP_DIR / "data"
+DB_DIR = APP_DIR / "db"
 
-API_KEY_FILE = DATA_DIR / "api_key.txt"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_DIR.mkdir(parents=True, exist_ok=True)
+
 USERS_FILE = DATA_DIR / "users.txt"

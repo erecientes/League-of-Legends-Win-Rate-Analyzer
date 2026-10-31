@@ -1,59 +1,31 @@
 """
-analysis_cache.py
-
-Derives fast, pre-parsed pandas DataFrames from the raw JSON blobs stored
-in MatchCache, for interactive filtering. Each match is parsed once and
-the result persisted to parquet, so repeated queries run against
-already-parsed data instead of re-parsing JSON. Only new matches are
-(re)processed on a given call.
-
-Produces three DataFrames:
-  matches_df -- one row per match: champions (both teams), win/loss, duration.
-  items_df   -- one row per completed item purchased (legendaries, boots),
-                labeled by category, with purchase_index counted per category.
-  runes_df   -- one row per rune selected, labeled by slot.
+Extracts and builds analytical Parquet DataFrames from raw match cache.
 
 Usage:
-    from match_filter import MatchFilter, build_mask
-    from analysis_cache import build_or_update_frames, best_items_per_slot
-
+    from analysis_cache import build_or_update_frames, best_items_per_slot, best_runes_per_slot
     matches_df, items_df, runes_df = build_or_update_frames(cache, my_puuid)
-    mask = build_mask(matches_df, MatchFilter(champions={"Yuumi", "Zed"}, min_champions_required=1))
-    print(best_items_per_slot(matches_df, items_df, mask))
 """
 
 from pathlib import Path
-
 import pandas as pd
-
 from config import DATA_DIR
 from item_data import classify_item, load_item_data, patch_from_game_version
 
-# Incremented whenever _process_match's extraction logic changes (a field
-# added, a column changed, a new table added). On mismatch,
-# build_or_update_frames discards the cached frames and reprocesses every
-# match from scratch, rather than silently returning frames from an
-# outdated schema.
 SCHEMA_VERSION = 1
 
 
-# ---- Parsing raw match_data / timeline_data into flat rows -----------------
-
 def _find_my_participant(match_data: dict, my_puuid: str) -> dict:
-    participants = match_data["info"]["participants"]
-    return next(p for p in participants if p["puuid"] == my_puuid)
+    """Find the participant record matching my_puuid in match_data."""
+    return next(p for p in match_data["info"]["participants"] if p["puuid"] == my_puuid)
 
 
 def _extract_champions(match_data: dict) -> frozenset:
-    """All 10 champions in the match, both teams combined."""
+    """Extract set of all 10 champion names in the match."""
     return frozenset(p["championName"] for p in match_data["info"]["participants"])
 
 
 def _extract_runes(participant: dict) -> list[tuple[str, int]]:
-    """Returns [(slot_label, rune_id), ...], e.g. [("keystone", 8214), ("primary_1", 8226), ...].
-
-    Unverified against a current match-v5 response; Riot's perks/styles
-    schema has changed in past patches and may change again."""
+    """Extract list of (slot_label, rune_id) tuples from participant perks."""
     runes = []
     styles = participant.get("perks", {}).get("styles", [])
     for style in styles:
@@ -68,13 +40,7 @@ def _extract_runes(participant: dict) -> list[tuple[str, int]]:
 def _extract_build_order(
     match_data: dict, timeline_data: dict, my_puuid: str, item_data: dict
 ) -> list[tuple[str, int]]:
-    """Returns [(category, item_id), ...] in chronological purchase order,
-    restricted to completed items (legendaries, boots) via classify_item.
-    ITEM_UNDO is resolved against the raw purchase list before filtering,
-    so beforeId always matches something actually purchased.
-
-    Approximate: not verified against production data, particularly item
-    upgrades/combines and ITEM_UNDO's beforeId/afterId behavior."""
+    """Extract chronological completed items [(category, item_id), ...], resolving ITEM_UNDO events."""
     my_participant_id = _find_my_participant(match_data, my_puuid)["participantId"]
 
     raw_purchases = []
@@ -101,7 +67,7 @@ def _extract_build_order(
 
 
 def _process_match(match_id: str, match_data: dict, timeline_data: dict, my_puuid: str, item_data: dict):
-    """Returns (match_row: dict, item_rows: list[dict], rune_rows: list[dict])."""
+    """Parse raw match and timeline JSON into flat tabular row dictionaries."""
     me = _find_my_participant(match_data, my_puuid)
 
     match_row = {
@@ -111,8 +77,6 @@ def _process_match(match_id: str, match_data: dict, timeline_data: dict, my_puui
         "game_duration_sec": match_data["info"]["gameDuration"],
     }
 
-    # Counted per category, so boots (max 1 per game) never share slot
-    # numbers with legendaries.
     category_counts: dict[str, int] = {}
     item_rows = []
     for category, item_id in _extract_build_order(match_data, timeline_data, my_puuid, item_data):
@@ -133,16 +97,8 @@ def _process_match(match_id: str, match_data: dict, timeline_data: dict, my_puui
     return match_row, item_rows, rune_rows
 
 
-# ---- Building / incrementally updating the cached frames -------------------
-
 def build_or_update_frames(cache, my_puuid: str, cache_dir: str | None = None):
-    """Loads cached parquet frames if present and schema-current, processes
-    any matches not yet in them, and appends the result. A schema mismatch
-    or missing cache reprocesses every match from scratch.
-
-    cache_dir defaults to a directory scoped to my_puuid under DATA_DIR
-    (mirrors the matches_<puuid>.db naming convention); override mainly
-    useful for pointing tests at a scratch directory."""
+    """Load or incrementally build matches, items, and runes DataFrames."""
     if cache_dir is None:
         cache_dir_path = DATA_DIR / f"analysis_cache_{my_puuid}"
     else:
@@ -162,8 +118,6 @@ def build_or_update_frames(cache, my_puuid: str, cache_dir: str | None = None):
         runes_df = pd.read_parquet(runes_path)
         already_processed = set(matches_df["match_id"])
     else:
-        # Either no cache yet, or the schema changed since it was written --
-        # either way, everything gets reprocessed from the raw JSON in `cache`.
         matches_df = pd.DataFrame(columns=["match_id", "champions", "win", "game_duration_sec"])
         items_df = pd.DataFrame(columns=["match_id", "category", "purchase_index", "item_id", "win"])
         runes_df = pd.DataFrame(columns=["match_id", "slot", "rune_id", "win"])
@@ -172,16 +126,14 @@ def build_or_update_frames(cache, my_puuid: str, cache_dir: str | None = None):
     new_match_ids = [mid for mid in cache.get_all_match_ids() if mid not in already_processed]
 
     if new_match_ids:
-        # Populated lazily; matches sharing a patch reuse the same
-        # item_data instead of each re-fetching it.
         item_data_cache: dict[str, dict] = {}
-
         new_match_rows, new_item_rows, new_rune_rows = [], [], []
+
         for match_id in new_match_ids:
             match_data = cache.get_match_data(match_id)
             timeline_data = cache.get_timeline_data(match_id)
             if timeline_data is None:
-                continue  # not yet backfilled; picked up on a subsequent call
+                continue
 
             patch = patch_from_game_version(match_data["info"]["gameVersion"])
             if patch not in item_data_cache:
@@ -198,8 +150,6 @@ def build_or_update_frames(cache, my_puuid: str, cache_dir: str | None = None):
         items_df = pd.concat([items_df, pd.DataFrame(new_item_rows)], ignore_index=True)
         runes_df = pd.concat([runes_df, pd.DataFrame(new_rune_rows)], ignore_index=True)
 
-        # Parquet does not support storing a frozenset directly; stored as
-        # a sorted tuple instead, which remains hashable and filterable.
         matches_df["champions"] = matches_df["champions"].apply(
             lambda c: tuple(sorted(c)) if isinstance(c, frozenset) else c
         )
@@ -209,17 +159,11 @@ def build_or_update_frames(cache, my_puuid: str, cache_dir: str | None = None):
         runes_df.to_parquet(runes_path)
 
     version_path.write_text(str(SCHEMA_VERSION))
-
     return matches_df, items_df, runes_df
 
 
-# ---- The actual interactive queries -----------------------------------------
-
 def _wilson_lower_bound(wins: pd.Series, games: pd.Series, z: float = 1.96) -> pd.Series:
-    """Lower bound of the Wilson score confidence interval for a binomial
-    win rate. Ranking by this instead of raw win_rate means a 100% win
-    rate over 1 game scores far lower than 65% over 200 games -- the
-    bound tightens toward the true win rate as games grows."""
+    """Calculate Wilson score lower bound for binomial confidence intervals."""
     phat = wins / games
     denom = 1 + z**2 / games
     center = phat + z**2 / (2 * games)
@@ -228,8 +172,7 @@ def _wilson_lower_bound(wins: pd.Series, games: pd.Series, z: float = 1.96) -> p
 
 
 def item_win_rates(matches_df: pd.DataFrame, items_df: pd.DataFrame, mask: pd.Series) -> pd.DataFrame:
-    """Win rate + game count per (category, purchase_index, item_id),
-    restricted to matches passing the filter."""
+    """Calculate win rate and Wilson score per item slot under mask."""
     filtered_ids = set(matches_df.loc[mask, "match_id"])
     filtered_items = items_df[items_df["match_id"].isin(filtered_ids)]
     result = (
@@ -243,8 +186,7 @@ def item_win_rates(matches_df: pd.DataFrame, items_df: pd.DataFrame, mask: pd.Se
 
 
 def rune_win_rates(matches_df: pd.DataFrame, runes_df: pd.DataFrame, mask: pd.Series) -> pd.DataFrame:
-    """Win rate + game count per (slot, rune_id), restricted to matches
-    passing the filter."""
+    """Calculate win rate and Wilson score per rune under mask."""
     filtered_ids = set(matches_df.loc[mask, "match_id"])
     filtered_runes = runes_df[runes_df["match_id"].isin(filtered_ids)]
     result = (
@@ -258,8 +200,7 @@ def rune_win_rates(matches_df: pd.DataFrame, runes_df: pd.DataFrame, mask: pd.Se
 
 
 def win_rate_by_duration(matches_df: pd.DataFrame, mask: pd.Series, bucket_minutes: int = 5) -> pd.DataFrame:
-    """Win rate + game count, bucketed by game duration rounded down to
-    the nearest bucket_minutes."""
+    """Group match win rates into time duration buckets."""
     filtered = matches_df[mask].copy()
     bucket_seconds = bucket_minutes * 60
     filtered["duration_bucket_min"] = (
@@ -273,9 +214,8 @@ def win_rate_by_duration(matches_df: pd.DataFrame, mask: pd.Series, bucket_minut
     )
 
 
-def best_items_per_slot(matches_df, items_df, mask, top_n: int = 5) -> pd.DataFrame:
-    """Top top_n item(s) per (category, purchase_index), ranked by Wilson
-    score (not raw win_rate), restricted to matches passing the filter."""
+def best_items_per_slot(matches_df: pd.DataFrame, items_df: pd.DataFrame, mask: pd.Series, top_n: int = 5) -> pd.DataFrame:
+    """Rank top item choices per category and purchase index by Wilson score."""
     rates = item_win_rates(matches_df, items_df, mask)
     return (
         rates.sort_values("wilson_score", ascending=False)
@@ -286,9 +226,8 @@ def best_items_per_slot(matches_df, items_df, mask, top_n: int = 5) -> pd.DataFr
     )
 
 
-def best_runes_per_slot(matches_df, runes_df, mask, top_n: int = 5) -> pd.DataFrame:
-    """Top top_n rune(s) per slot, ranked by Wilson score, restricted to
-    matches passing the filter."""
+def best_runes_per_slot(matches_df: pd.DataFrame, runes_df: pd.DataFrame, mask: pd.Series, top_n: int = 5) -> pd.DataFrame:
+    """Rank top rune choices per slot by Wilson score."""
     rates = rune_win_rates(matches_df, runes_df, mask)
     return (
         rates.sort_values("wilson_score", ascending=False)

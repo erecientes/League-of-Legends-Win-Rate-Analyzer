@@ -1,22 +1,67 @@
-from config import API_KEY_FILE
- 
+"""
+Riot API key loader and updater backed by environment variables and .env.
+
+Usage:
+    from get_key import load_saved_key, update_key
+    api_key = load_saved_key()
+"""
+
+import os
+from config import ENV_FILE
+
+
+def _read_env_key() -> str | None:
+    """Read RIOT_API_KEY from environment or .env file."""
+    if os.getenv("RIOT_API_KEY"):
+        return os.environ["RIOT_API_KEY"].strip()
+
+    if ENV_FILE.exists():
+        with open(ENV_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#") or not line:
+                    continue
+                if "=" in line:
+                    key, val = line.split("=", 1)
+                    if key.strip() == "RIOT_API_KEY":
+                        val = val.strip().strip("'\"")
+                        if val:
+                            os.environ["RIOT_API_KEY"] = val
+                            return val
+    return None
+
+
 def load_saved_key() -> str:
-    """Read the currently-saved key, prompting for one if none exists yet."""
-    try:
-        with open(API_KEY_FILE, "r") as file:
-            return file.read().strip()
-    except FileNotFoundError:
-        return update_key()
- 
+    """Return active API key or prompt for a new one if missing."""
+    key = _read_env_key()
+    if key:
+        return key
+    return update_key()
+
+
 def update_key() -> str:
-    """Prompt the user for a new key, persist it, and return it.
-    Passes to RiotAPIClient as key_refresh_callback."""
+    """Prompt for a new API key and persist to .env and environment."""
     new_key = input(
-        "Your Riot API key appears to be missing, invalid, or expired.\n"
-        "Enter a new API key: "
+        "Riot API key is missing, invalid, or expired.\n"
+        "Enter API key: "
     ).strip()
-    with open(API_KEY_FILE, "w") as file:
-        file.write(new_key)
-    print(f"API key saved to {API_KEY_FILE}.")
+
+    lines = []
+    found = False
+    if ENV_FILE.exists():
+        with open(ENV_FILE, "r") as f:
+            for line in f:
+                if line.strip().startswith("RIOT_API_KEY="):
+                    lines.append(f"RIOT_API_KEY={new_key}\n")
+                    found = True
+                else:
+                    lines.append(line)
+    if not found:
+        lines.append(f"RIOT_API_KEY={new_key}\n")
+
+    with open(ENV_FILE, "w") as f:
+        f.writelines(lines)
+
+    os.environ["RIOT_API_KEY"] = new_key
+    print(f"API key saved to {ENV_FILE}.")
     return new_key
- 
