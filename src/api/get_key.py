@@ -2,19 +2,17 @@
 Riot API key loader and updater backed by environment variables and .env.
 
 Usage:
-    from get_key import load_saved_key, update_key
+    from api.get_key import load_saved_key, update_key
     api_key = load_saved_key()
 """
 
 import os
+import sys
 from config import ENV_FILE
 
 
 def _read_env_key() -> str | None:
-    """Read RIOT_API_KEY from environment or .env file."""
-    if os.getenv("RIOT_API_KEY"):
-        return os.environ["RIOT_API_KEY"].strip()
-
+    """Read RIOT_API_KEY from .env file first, then system environment."""
     if ENV_FILE.exists():
         with open(ENV_FILE, "r") as f:
             for line in f:
@@ -28,6 +26,10 @@ def _read_env_key() -> str | None:
                         if val:
                             os.environ["RIOT_API_KEY"] = val
                             return val
+
+    if os.getenv("RIOT_API_KEY"):
+        return os.environ["RIOT_API_KEY"].strip()
+
     return None
 
 
@@ -40,11 +42,30 @@ def load_saved_key() -> str:
 
 
 def update_key() -> str:
-    """Prompt for a new API key and persist to .env and environment."""
-    new_key = input(
-        "Riot API key is missing, invalid, or expired.\n"
-        "Enter API key: "
-    ).strip()
+    """Prompt for a new API key via GUI dialog or terminal, then persist to .env."""
+    new_key = None
+
+    # Check if running without a console (e.g. PyInstaller --noconsole)
+    if sys.stdin is None or not hasattr(sys.stdin, "isatty") or not sys.stdin.isatty():
+        try:
+            import customtkinter as ctk
+            dialog = ctk.CTkInputDialog(
+                text="Your Riot API key is missing or expired.\nEnter API key:",
+                title="Riot API Key Required"
+            )
+            val = dialog.get_input()
+            if val:
+                new_key = val.strip()
+        except Exception:
+            pass
+
+    if not new_key:
+        try:
+            new_key = input(
+                "Riot API key is missing, invalid, or expired.\nEnter API key: "
+            ).strip()
+        except (RuntimeError, EOFError):
+            new_key = ""
 
     lines = []
     found = False
