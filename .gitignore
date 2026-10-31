@@ -1,6 +1,9 @@
 # Environment variables & secrets
 .env
 
+# Virtual Environment
+.venv/
+
 # Local data — API key, cached usernames
 data/
 
@@ -14,5 +17,9 @@ tests/
 __pycache__/
 *.pyc
 
-# Todo
+# Todo & Roadmaps
 ideas.md
+roadmap.md
+
+# Agent customizations & local rules
+.agents/
