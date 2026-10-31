@@ -5,10 +5,10 @@ Usage:
     python src/update_cache.py
 """
 
-from riot_client import RiotAPIClient, InvalidAPIKeyError, RiotAPIError
-from get_key import load_saved_key, update_key
-from get_puuid import get_puuid
-import match_cache
+from api.riot_client import RiotAPIClient, InvalidAPIKeyError, RiotAPIError
+from api.get_key import load_saved_key, update_key
+from api.get_puuid import get_puuid
+from storage.match_cache import MatchCache
 
 
 def update_match_db(cache, client, puuid: str, count: int = 20) -> None:
@@ -43,7 +43,7 @@ def main():
 
     try:
         puuid = get_puuid(username, tag, client)
-        cache = match_cache.MatchCache(f"matches_{puuid}.db")
+        cache = MatchCache(f"matches_{puuid}.db")
         cache_rank(client, puuid)
         update_match_db(cache, client, puuid)
 

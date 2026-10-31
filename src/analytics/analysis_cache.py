@@ -9,7 +9,7 @@ Usage:
 from pathlib import Path
 import pandas as pd
 from config import DATA_DIR
-from item_data import classify_item, load_item_data, patch_from_game_version
+from analytics.item_data import classify_item, load_item_data, patch_from_game_version
 
 SCHEMA_VERSION = 1
 
